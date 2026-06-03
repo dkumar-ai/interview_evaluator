@@ -314,18 +314,51 @@ vector = [0.001] * dimension
 
 for user_id, payload in users.items():
 
+    session_id = "test_session"
+
+    # INTERVIEW QUESTIONS
+
     index.upsert(
         vectors=[
             {
-                "id": f"{user_id}_interview_responses",
+                "id": f"{user_id}_interview_questions_{session_id}",
                 "values": vector,
                 "metadata": {
-                    "doc_type": "interview_responses",
+                    "doc_type": "interview_questions",
                     "user_id": user_id,
-                    "session_id": f"{user_id}_session",
-                    "module_id": "mod_genai_001",
-                    "timestamp": 1780401000,
-                    "text": json.dumps(payload)
+                    "session_id": session_id,
+                    "text": json.dumps(
+                        {
+                            "session_id": session_id,
+                            "user_id": user_id,
+                            "questions": payload["responses"]
+                        }
+                    )
+                }
+            }
+        ],
+        namespace=user_id
+    )
+
+    # INTERVIEW SESSION
+
+    index.upsert(
+        vectors=[
+            {
+                "id": f"{user_id}_interview_session_{session_id}",
+                "values": vector,
+                "metadata": {
+                    "doc_type": "interview_session",
+                    "user_id": user_id,
+                    "session_id": session_id,
+                    "text": json.dumps(
+                        {
+                            "session_id": session_id,
+                            "user_id": user_id,
+                            "status": "completed",
+                            "role": "AI Engineer"
+                        }
+                    )
                 }
             }
         ],
