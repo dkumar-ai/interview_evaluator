@@ -16,10 +16,20 @@ st.markdown(
     "Evaluate completed interview sessions stored in Pinecone."
 )
 
-user_id = st.text_input(
-    "User ID",
-    value="test_user_001"
+user_options = [
+    "user_001 - Beginner AI Student",
+    "user_002 - ML Engineer",
+    "user_003 - GenAI Engineer",
+    "user_004 - AI Architect",
+    "user_005 - Weak Candidate"
+]
+
+selected_user = st.selectbox(
+    "Select User",
+    user_options
 )
+
+user_id = selected_user.split(" - ")[0]
 
 if st.button("Evaluate Interview"):
 
