@@ -1,6 +1,6 @@
 import streamlit as st
 
-from services.pinecone_services import get_interview_data, get_all_sessions
+
 from services.pinecone_services import get_interview_data
 from services.evaluator import evaluate_interview
 from services.mastery import calculate_mastery
