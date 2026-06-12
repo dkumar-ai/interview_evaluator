@@ -70,4 +70,33 @@ def get_interview_data(user_id):
                 str(e)
             )
 
+def get_all_sessions():
+
+    results = index.query(
+        vector=[0.001] * 3072,
+        top_k=1000,
+        include_metadata=True
+    )
+
+    sessions = []
+
+    for match in results.matches:
+
+        metadata = match.metadata
+
+        if metadata.get("doc_type") == "interview_questions":
+
+            user_id = match.namespace
+            session_id = metadata.get("session_id", "Latest")
+
+            session_label = f"{user_id} - {session_id}"
+
+            sessions.append({
+                "label": session_label,
+                "user_id": user_id,
+                "session_id": session_id
+            })
+
+    return sessions
+
     return []
