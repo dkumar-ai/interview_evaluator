@@ -1,7 +1,7 @@
 import streamlit as st
 
-from services.pinecone_service import get_interview_data, get_all_sessions
-from services.pinecone_service import get_interview_data
+from services.pinecone_services import get_interview_data, get_all_sessions
+from services.pinecone_services import get_interview_data
 from services.evaluator import evaluate_interview
 from services.mastery import calculate_mastery
 
@@ -202,6 +202,44 @@ summary = report.get(
     "No summary available."
 )
 
+# ===================================
+# DESIGN MAPPING
+# ===================================
+
+if readiness_score >= 90:
+    performance_label = "Excellent Performance"
+elif readiness_score >= 80:
+    performance_label = "Strong Performance"
+elif readiness_score >= 70:
+    performance_label = "Good Performance"
+elif readiness_score >= 60:
+    performance_label = "Needs Improvement"
+else:
+    performance_label = "Requires Practice"
+
+presence_score = rubric.get(
+    "confidence",
+    readiness_score
+)
+
+if presence_score >= 85:
+    presence_summary = "Confident delivery and professional communication."
+elif presence_score >= 70:
+    presence_summary = "Good communication with room for stronger delivery."
+else:
+    presence_summary = "Communication confidence can be improved."
+
+coach_moments = []
+
+for index, gap in enumerate(gaps[:2], start=1):
+    coach_moments.append(
+        {
+            "timestamp": f"0{index}:00",
+            "title": gap[:50],
+            "feedback": gap
+        }
+    )
+
 st.success(
     "Evaluation Generated Successfully"
 )
@@ -314,6 +352,9 @@ with center_panel:
             "Readiness",
             readiness_score
         )
+        st.caption(
+    performance_label
+)
 
     with row1[1]:
 
@@ -408,7 +449,7 @@ with center_panel:
 
                 answer = item.get(
                     "answer",
-                    ""
+        ""
                 )
 
                 st.markdown(
@@ -489,3 +530,29 @@ with right_panel:
         st.info(
             "No learning gaps identified."
         )
+
+    st.divider()
+
+st.markdown(
+    "## Interview Coach"
+)
+
+if coach_moments:
+
+    for moment in coach_moments:
+
+        st.markdown(
+            f"""
+            **{moment['timestamp']}**
+
+            **{moment['title']}**
+
+            {moment['feedback']}
+            """
+        )
+
+else:
+
+    st.info(
+        "No coach moments available."
+    )
