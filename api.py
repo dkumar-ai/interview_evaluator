@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
 
-from services.pinecone_service import get_interview_data, get_evaluation_result
+from services.pinecone_service import get_interview_data, get_evaluation_result, get_all_sessions
 from services.evaluator import evaluate_interview
 from services.mastery import calculate_mastery
 
@@ -34,10 +34,18 @@ def health():
     return {"status": "ok", "service": "interview-evaluator"}
 
 
+@app.get("/sessions")
+def sessions():
+    all_sessions = get_all_sessions()
+    return {
+        "status": "success",
+        "sessions": all_sessions
+    }
+
+
 @app.post("/evaluate")
 def evaluate(req: EvaluateRequest):
 
-    # Use transcript from frontend if provided
     if req.transcript and len(req.transcript) > 0:
         conversation = [
             {"question": qa.question, "answer": qa.answer}
@@ -45,7 +53,6 @@ def evaluate(req: EvaluateRequest):
         ]
         print(f"[EVAL] Using frontend transcript — {len(conversation)} Q&A pairs")
 
-    # Fallback to Pinecone
     else:
         print(f"[EVAL] No transcript in request — fetching from Pinecone for user={req.user_id}")
         conversation = get_interview_data(req.user_id)
@@ -78,7 +85,6 @@ def get_evaluation(user_id: str, session_id: str):
 
     result = get_evaluation_result(user_id, session_id)
 
-    # Evaluation exists and is complete
     if result and result["status"] == "completed":
         return {
             "status": "success",
@@ -87,7 +93,6 @@ def get_evaluation(user_id: str, session_id: str):
             "report": result["report"]
         }
 
-    # Lambda triggered but evaluation still running
     if result and result["status"] == "PROCESSING":
         return {
             "status": "PROCESSING",
@@ -96,7 +101,6 @@ def get_evaluation(user_id: str, session_id: str):
             "report": None
         }
 
-    # Lambda failed
     if result and result["status"] == "FAILED":
         return {
             "status": "FAILED",
@@ -105,7 +109,6 @@ def get_evaluation(user_id: str, session_id: str):
             "report": None
         }
 
-    # Nothing found at all
     raise HTTPException(
         status_code=404,
         detail=f"No evaluation found for user_id={user_id} session_id={session_id}"
