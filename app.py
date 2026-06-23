@@ -1,7 +1,7 @@
 import streamlit as st
 
-from services.pinecone_service import get_interview_data, get_all_sessions
-from services.pinecone_service import get_interview_data
+from services.pinecone_services import get_interview_data, get_all_sessions
+from services.pinecone_services import get_interview_data
 from services.evaluator import evaluate_interview
 from services.mastery import calculate_mastery
 
@@ -203,42 +203,16 @@ summary = report.get(
 )
 
 # ===================================
-# DESIGN MAPPING
+# DESIGN MAPPING — read from report, no longer re-derived here
 # ===================================
 
-if readiness_score >= 90:
-    performance_label = "Excellent Performance"
-elif readiness_score >= 80:
-    performance_label = "Strong Performance"
-elif readiness_score >= 70:
-    performance_label = "Good Performance"
-elif readiness_score >= 60:
-    performance_label = "Needs Improvement"
-else:
-    performance_label = "Requires Practice"
+performance_label = report.get("performance_label", "Good Performance")
 
-presence_score = rubric.get(
-    "confidence",
-    readiness_score
-)
+presence          = report.get("interview_presence", {})
+presence_score    = presence.get("score",   rubric.get("confidence", readiness_score))
+presence_summary  = presence.get("summary", "")
 
-if presence_score >= 85:
-    presence_summary = "Confident delivery and professional communication."
-elif presence_score >= 70:
-    presence_summary = "Good communication with room for stronger delivery."
-else:
-    presence_summary = "Communication confidence can be improved."
-
-coach_moments = []
-
-for index, gap in enumerate(gaps[:2], start=1):
-    coach_moments.append(
-        {
-            "timestamp": f"0{index}:00",
-            "title": gap[:50],
-            "feedback": gap
-        }
-    )
+coach_moments     = report.get("coach_moments", [])
 
 st.success(
     "Evaluation Generated Successfully"
@@ -342,9 +316,7 @@ with center_panel:
         "## Evaluation Metrics"
     )
 
-    row1 = st.columns(
-        4
-    )
+    row1 = st.columns(4)
 
     with row1[0]:
 
@@ -352,62 +324,43 @@ with center_panel:
             "Readiness",
             readiness_score
         )
-        st.caption(
-    performance_label
-)
+        st.caption(performance_label)
 
     with row1[1]:
 
         st.metric(
             "Clarity",
-            rubric.get(
-                "clarity_structure",
-                0
-            )
+            rubric.get("clarity_structure", 0)
         )
 
     with row1[2]:
 
         st.metric(
             "Technical",
-            rubric.get(
-                "technical_depth",
-                0
-            )
+            rubric.get("technical_depth", 0)
         )
 
     with row1[3]:
 
         st.metric(
             "Confidence",
-            rubric.get(
-                "confidence",
-                0
-            )
+            rubric.get("confidence", 0)
         )
 
-    row2 = st.columns(
-        3
-    )
+    row2 = st.columns(3)
 
     with row2[0]:
 
         st.metric(
             "Storytelling",
-            rubric.get(
-                "storytelling",
-                0
-            )
+            rubric.get("storytelling", 0)
         )
 
     with row2[1]:
 
         st.metric(
             "Question Handling",
-            rubric.get(
-                "question_handling",
-                0
-            )
+            rubric.get("question_handling", 0)
         )
 
     with row2[2]:
@@ -423,9 +376,7 @@ with center_panel:
         f"## Interview Transcript ({len(conversation)} Questions)"
     )
 
-    transcript_container = st.container(
-        border=True
-    )
+    transcript_container = st.container(border=True)
 
     with transcript_container:
 
@@ -437,20 +388,10 @@ with center_panel:
 
         else:
 
-            for index, item in enumerate(
-                conversation,
-                start=1
-            ):
+            for index, item in enumerate(conversation, start=1):
 
-                question = item.get(
-                    "question",
-                    ""
-                )
-
-                answer = item.get(
-                    "answer",
-        ""
-                )
+                question = item.get("question", "")
+                answer   = item.get("answer",   "")
 
                 st.markdown(
                     f"""
@@ -478,9 +419,7 @@ with center_panel:
 
 with right_panel:
 
-    st.markdown(
-        "## Summary"
-    )
+    st.markdown("## Summary")
 
     st.markdown(
         f"""
@@ -493,49 +432,39 @@ with right_panel:
 
     st.divider()
 
-    st.markdown(
-        "## Strengths"
-    )
+    # ── Interview Presence ──────────────────────────────────────────────────
+    st.markdown("## Interview Presence")
+
+    st.metric("Presence Score", presence_score)
+    st.caption(presence_summary)
+
+    st.divider()
+
+    st.markdown("## Strengths")
 
     if strengths:
-
         for item in strengths:
-
-            st.success(
-                item
-            )
-
+            st.success(item)
     else:
-
-        st.info(
-            "No strengths identified."
-        )
+        st.info("No strengths identified.")
 
     st.divider()
 
-    st.markdown(
-        "## Learning Gaps"
-    )
+    st.markdown("## Learning Gaps")
 
     if gaps:
-
         for item in gaps:
-
-            st.warning(
-                item
-            )
-
+            st.warning(item)
     else:
-
-        st.info(
-            "No learning gaps identified."
-        )
+        st.info("No learning gaps identified.")
 
     st.divider()
 
-st.markdown(
-    "## Interview Coach"
-)
+# =========================
+# INTERVIEW COACH
+# =========================
+
+st.markdown("## Interview Coach")
 
 if coach_moments:
 
@@ -543,8 +472,6 @@ if coach_moments:
 
         st.markdown(
             f"""
-            **{moment['timestamp']}**
-
             **{moment['title']}**
 
             {moment['feedback']}
@@ -553,6 +480,4 @@ if coach_moments:
 
 else:
 
-    st.info(
-        "No coach moments available."
-    )
+    st.info("No coach moments available.")
