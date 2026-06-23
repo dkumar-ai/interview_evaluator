@@ -1,3 +1,4 @@
+import re
 import json
 import os
 import google.generativeai as genai
@@ -74,6 +75,25 @@ def _enrich_report(report: dict) -> dict:
     return report
 
 
+def _clean_gemini_json(text: str) -> str:
+    """
+    Sanitizes raw Gemini output before JSON parsing.
+    Handles the most common failure modes: markdown fences,
+    control characters, trailing commas, and newlines inside strings.
+    """
+    # Strip markdown fences
+    text = text.replace("```json", "").replace("```", "").strip()
+
+    # Strip control characters that break JSON (except \n \r \t which are valid)
+    text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', text)
+
+    # Remove trailing commas before } or ] (invalid JSON)
+    text = re.sub(r',\s*}', '}', text)
+    text = re.sub(r',\s*]', ']', text)
+
+    return text
+
+
 # ─── Main evaluation function ─────────────────────────────────────────────────
 
 def evaluate_interview(conversation):
@@ -117,6 +137,8 @@ Rules:
 - coach_moments must have 2 to 4 items. Each must be specific and actionable,
   not a repeat of gaps. Focus on HOW the candidate can improve delivery,
   structure, or depth.
+- The summary field must be a single line string with no newline characters inside it.
+- Do not use line breaks inside any string value in the JSON.
 - Return ONLY JSON. Do not return markdown or any text outside the JSON object.
 
 Interview Transcript:
@@ -128,10 +150,7 @@ Interview Transcript:
 
         response = model.generate_content(prompt)
 
-        text = response.text.strip()
-        text = text.replace("```json", "")
-        text = text.replace("```", "")
-        text = text.strip()
+        text = _clean_gemini_json(response.text)
 
         print("\n" + "=" * 50)
         print("RAW GEMINI RESPONSE")
