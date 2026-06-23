@@ -70,6 +70,49 @@ def get_interview_data(user_id):
                 str(e)
             )
 
+
+def get_evaluation_result(user_id: str, session_id: str):
+
+    results = index.query(
+        namespace=user_id,
+        vector=[0.001] * 3072,
+        top_k=100,
+        include_metadata=True
+    )
+
+    # Check for a completed evaluation first
+    for match in results.matches:
+
+        metadata = match.metadata
+
+        if (metadata.get("doc_type") == "interview_evaluation" and
+                metadata.get("session_id") == session_id):
+
+            try:
+                return {
+                    "status": "completed",
+                    "report": json.loads(metadata.get("text", "{}"))
+                }
+            except Exception as e:
+                print("EVALUATION PARSE ERROR:", str(e))
+                return None
+
+    # No completed evaluation — check if one is still processing
+    for match in results.matches:
+
+        metadata = match.metadata
+
+        if (metadata.get("doc_type") == "evaluation_status" and
+                metadata.get("session_id") == session_id):
+
+            return {
+                "status": metadata.get("status", "PROCESSING"),
+                "report": None
+            }
+
+    return None
+
+
 def get_all_sessions():
 
     results = index.query(
@@ -98,5 +141,3 @@ def get_all_sessions():
             })
 
     return sessions
-
-    return []
