@@ -1,5 +1,7 @@
 import os
 import json
+import json
+import uuid
 from pinecone import Pinecone
 from dotenv import load_dotenv
 
@@ -14,6 +16,35 @@ index = pc.Index(
 )
 
 
+
+
+def store_evaluation_result(
+    user_id: str,
+    session_id: str,
+    report: dict
+):
+
+    vector_id = f"evaluation-{session_id}"
+
+    index.upsert(
+        vectors=[
+            {
+                "id": vector_id,
+                "values": [0.001] * 3072,
+                "metadata": {
+                    "doc_type": "interview_evaluation",
+                    "session_id": session_id,
+                    "text": json.dumps(report)
+                }
+            }
+        ],
+        namespace=user_id
+    )
+
+    print(
+        f"[PINECONE] Stored evaluation for "
+        f"user={user_id} session={session_id}"
+    )
 def get_interview_data(user_id):
 
     results = index.query(
