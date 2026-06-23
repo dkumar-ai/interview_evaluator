@@ -14,6 +14,68 @@ model = genai.GenerativeModel(
 )
 
 
+# ─── Deterministic enrichment (no LLM needed) ────────────────────────────────
+
+def _derive_performance_label(readiness_score: int) -> str:
+    if readiness_score >= 90:
+        return "Excellent Performance"
+    elif readiness_score >= 80:
+        return "Strong Performance"
+    elif readiness_score >= 70:
+        return "Good Performance"
+    elif readiness_score >= 60:
+        return "Needs Improvement"
+    else:
+        return "Requires Practice"
+
+
+def _derive_presence(rubric: dict, readiness_score: int) -> tuple[int, str]:
+    presence_score = int(rubric.get("confidence", readiness_score))
+    if presence_score >= 85:
+        presence_summary = "Confident delivery and professional communication."
+    elif presence_score >= 70:
+        presence_summary = "Good communication with room for stronger delivery."
+    else:
+        presence_summary = "Communication confidence can be improved."
+    return presence_score, presence_summary
+
+
+def _enrich_report(report: dict) -> dict:
+    """
+    Adds performance_label, interview_presence, and coach_moments to the
+    report dict in-place and returns it. Called after every Gemini parse
+    and also applied to the fallback payload.
+    """
+    readiness = int(report.get("readiness_score", 70))
+    rubric    = report.get("rubric_scores", {})
+
+    # 1. performance_label
+    report["performance_label"] = _derive_performance_label(readiness)
+
+    # 2. interview_presence  (score + one-line summary as a nested object)
+    presence_score, presence_summary = _derive_presence(rubric, readiness)
+    report["interview_presence"] = {
+        "score":   presence_score,
+        "summary": presence_summary
+    }
+
+    # 3. coach_moments — Gemini is asked to return these directly (see prompt).
+    #    If missing or malformed, fall back to deriving from gaps so the
+    #    field is always present.
+    if not isinstance(report.get("coach_moments"), list) or len(report.get("coach_moments", [])) == 0:
+        coach_moments = []
+        for idx, gap in enumerate(report.get("gaps", [])[:3], start=1):
+            coach_moments.append({
+                "title":    gap[:60],
+                "feedback": gap
+            })
+        report["coach_moments"] = coach_moments
+
+    return report
+
+
+# ─── Main evaluation function ─────────────────────────────────────────────────
+
 def evaluate_interview(conversation):
 
     transcript = "\n\n".join(
@@ -26,9 +88,7 @@ def evaluate_interview(conversation):
     prompt = f"""
 You are an expert interview evaluator.
 
-Analyze the interview transcript.
-
-Return ONLY valid JSON.
+Analyze the interview transcript and return ONLY valid JSON matching the schema below.
 
 Required Schema:
 
@@ -43,13 +103,21 @@ Required Schema:
     }},
     "strengths": [],
     "gaps": [],
-    "summary": ""
+    "summary": "",
+    "coach_moments": [
+        {{
+            "title": "Short label for this coaching point (max 60 chars)",
+            "feedback": "Specific, actionable coaching advice for the candidate"
+        }}
+    ]
 }}
 
 Rules:
 - All scores must be integers between 0 and 100.
-- Return ONLY JSON.
-- Do not return markdown.
+- coach_moments must have 2 to 4 items. Each must be specific and actionable,
+  not a repeat of gaps. Focus on HOW the candidate can improve delivery,
+  structure, or depth.
+- Return ONLY JSON. Do not return markdown or any text outside the JSON object.
 
 Interview Transcript:
 
@@ -73,49 +141,49 @@ Interview Transcript:
 
         report = json.loads(text)
 
-        # Handle old Gemini schema if returned
+        # ── Handle legacy Gemini schema (old 1-5 scale responses) ──────────
         if "technical_score" in report:
 
-            technical = int(report.get("technical_score", 3)) * 20
-            communication = int(report.get("communication_score", 3)) * 20
-            confidence = int(report.get("confidence_score", 3)) * 20
+            technical       = int(report.get("technical_score",       3)) * 20
+            communication   = int(report.get("communication_score",   3)) * 20
+            confidence      = int(report.get("confidence_score",      3)) * 20
             problem_solving = int(report.get("problem_solving_score", 3)) * 20
-            readiness = int(report.get("overall_readiness", 3)) * 20
+            readiness       = int(report.get("overall_readiness",     3)) * 20
 
             report = {
                 "readiness_score": readiness,
                 "rubric_scores": {
                     "clarity_structure": communication,
-                    "technical_depth": technical,
-                    "confidence": confidence,
-                    "storytelling": communication,
+                    "technical_depth":   technical,
+                    "confidence":        confidence,
+                    "storytelling":      communication,
                     "question_handling": problem_solving
                 },
-                "strengths": report.get("strengths", []),
-                "gaps": report.get("weaknesses", []),
-                "summary": report.get("summary", "")
+                "strengths":     report.get("strengths",  []),
+                "gaps":          report.get("weaknesses", []),
+                "summary":       report.get("summary",    ""),
+                "coach_moments": []  # filled by _enrich_report fallback
             }
 
-        readiness = int(
-            report.get(
-                "readiness_score",
-                70
-            )
-        )
+        # ── Ensure all base fields exist ────────────────────────────────────
+        readiness = int(report.get("readiness_score", 70))
 
         if "rubric_scores" not in report:
-
             report["rubric_scores"] = {
                 "clarity_structure": readiness,
-                "technical_depth": readiness,
-                "confidence": readiness,
-                "storytelling": readiness,
+                "technical_depth":   readiness,
+                "confidence":        readiness,
+                "storytelling":      readiness,
                 "question_handling": readiness
             }
 
-        report.setdefault("strengths", [])
-        report.setdefault("gaps", [])
-        report.setdefault("summary", "")
+        report.setdefault("strengths",     [])
+        report.setdefault("gaps",          [])
+        report.setdefault("summary",       "")
+        report.setdefault("coach_moments", [])
+
+        # ── Add derived design fields ───────────────────────────────────────
+        report = _enrich_report(report)
 
         return report
 
@@ -123,13 +191,13 @@ Interview Transcript:
 
         print("EVALUATOR ERROR:", str(e))
 
-        return {
+        fallback = {
             "readiness_score": 70,
             "rubric_scores": {
                 "clarity_structure": 70,
-                "technical_depth": 70,
-                "confidence": 70,
-                "storytelling": 70,
+                "technical_depth":   70,
+                "confidence":        70,
+                "storytelling":      70,
                 "question_handling": 70
             },
             "strengths": [
@@ -138,5 +206,17 @@ Interview Transcript:
             "gaps": [
                 f"Evaluation error: {str(e)}"
             ],
-            "summary": "Fallback evaluation generated due to parsing error."
+            "summary": "Fallback evaluation generated due to parsing error.",
+            "coach_moments": [
+                {
+                    "title":    "Review your answer structure",
+                    "feedback": "Use the STAR method (Situation, Task, Action, Result) to frame answers clearly."
+                },
+                {
+                    "title":    "Strengthen technical depth",
+                    "feedback": "Back each technical claim with a concrete example or metric from past experience."
+                }
+            ]
         }
+
+        return _enrich_report(fallback)
