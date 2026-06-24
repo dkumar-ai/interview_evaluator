@@ -1,15 +1,14 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
 
-from services.pinecone_service import (
-    get_interview_data,
-    get_evaluation_result,
-    store_evaluation_result
-)
+import requests
+
+from services.pinecone_service import get_interview_data
 from services.evaluator import evaluate_interview
 from services.mastery import calculate_mastery
+
 
 app = FastAPI()
 
@@ -21,6 +20,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+BACKEND_URL = "https://qp158oafxk.execute-api.ap-south-1.amazonaws.com"
+
 
 class QAPair(BaseModel):
     question: str
@@ -29,111 +30,177 @@ class QAPair(BaseModel):
 
 class EvaluateRequest(BaseModel):
     user_id: str
-    session_id: Optional[str] = None
+    session_id: Optional[int] = None
     transcript: Optional[List[QAPair]] = None
+
+
+def save_evaluation_to_backend(session_id: int, report: dict):
+
+    rubric = report.get("rubric_scores", {})
+    presence = report.get("interview_presence", {})
+
+    payload = {
+        "session_id": session_id,
+
+        "overall_score": report.get(
+            "readiness_score",
+            0
+        ),
+
+        "performance_label": report.get(
+            "performance_label",
+            ""
+        ),
+
+        "skill_evaluation": {
+            "clarity": rubric.get(
+                "clarity_structure",
+                0
+            ),
+            "technical": rubric.get(
+                "technical_depth",
+                0
+            ),
+            "confidence": rubric.get(
+                "confidence",
+                0
+            ),
+            "storytelling": rubric.get(
+                "storytelling",
+                0
+            ),
+            "question_handling": rubric.get(
+                "question_handling",
+                0
+            )
+        },
+
+        "presence_score": presence.get(
+            "score",
+            0
+        ),
+
+        "presence_summary": presence.get(
+            "summary",
+            ""
+        ),
+
+        "strengths": report.get(
+            "strengths",
+            []
+        ),
+
+        "improvement_areas": report.get(
+            "gaps",
+            []
+        ),
+
+        "coach_moments": report.get(
+            "coach_moments",
+            []
+        ),
+
+        "summary": report.get(
+            "summary",
+            ""
+        )
+    }
+
+    response = requests.post(
+        f"{BACKEND_URL}/interview/evaluation",
+        json=payload,
+        timeout=30
+    )
+
+    response.raise_for_status()
+
+    return response.json()
 
 
 @app.get("/")
 def health():
-    return {"status": "ok", "service": "interview-evaluator"}
+    return {
+        "status": "ok",
+        "service": "interview-evaluator"
+    }
 
 
 @app.post("/evaluate")
 def evaluate(req: EvaluateRequest):
 
     if req.transcript and len(req.transcript) > 0:
+
         conversation = [
-            {"question": qa.question, "answer": qa.answer}
+            {
+                "question": qa.question,
+                "answer": qa.answer
+            }
             for qa in req.transcript
         ]
+
+        print(
+            f"[EVAL] Using frontend transcript "
+            f"({len(conversation)} Q&A pairs)"
+        )
+
     else:
-        conversation = get_interview_data(req.user_id)
+
+        print(
+            f"[EVAL] Fetching transcript from Pinecone "
+            f"for user={req.user_id}"
+        )
+
+        conversation = get_interview_data(
+            req.user_id
+        )
 
     if not conversation:
+
         return {
             "status": "error",
             "message": "No interview data found"
         }
 
-    report = evaluate_interview(conversation)
-    mastery = calculate_mastery(report)
+    report = evaluate_interview(
+        conversation
+    )
 
-    # SAVE TO PINECONE
+    mastery = calculate_mastery(
+        report
+    )
+
+    backend_response = None
+
     if req.session_id:
-        store_evaluation_result(
-            req.user_id,
-            req.session_id,
-            report
-        )
+
+        try:
+
+            backend_response = save_evaluation_to_backend(
+                req.session_id,
+                report
+            )
+
+            print(
+                f"[BACKEND] Evaluation saved "
+                f"for session={req.session_id}"
+            )
+
+        except Exception as e:
+
+            print(
+                f"[BACKEND ERROR] {str(e)}"
+            )
+
+            return {
+                "status": "error",
+                "message": f"Failed to save evaluation to backend: {str(e)}"
+            }
 
     return {
         "status": "success",
         "user_id": req.user_id,
         "session_id": req.session_id,
         "mastery": mastery,
-        "report": report
+        "report": report,
+        "backend_response": backend_response
     }
-
-
-@app.get("/interview/evaluation")
-def get_evaluation(user_id: str, session_id: str):
-
-    if not user_id or not session_id:
-        raise HTTPException(
-            status_code=400,
-            detail="user_id and session_id are required"
-        )
-
-    result = get_evaluation_result(user_id, session_id)
-
-    # Evaluation exists and is complete
-    if result and result["status"] == "completed":
-        return {
-            "status": "success",
-            "user_id": user_id,
-            "session_id": session_id,
-            "report": result["report"]
-        }
-
-    # Lambda triggered but evaluation still running
-    if result and result["status"] == "PROCESSING":
-        return {
-            "status": "PROCESSING",
-            "user_id": user_id,
-            "session_id": session_id,
-            "report": None
-        }
-
-    # Lambda failed
-    if result and result["status"] == "FAILED":
-        return {
-            "status": "FAILED",
-            "user_id": user_id,
-            "session_id": session_id,
-            "report": None
-        }
-
-    # Nothing found at all
-    raise HTTPException(
-        status_code=404,
-        detail=f"No evaluation found for user_id={user_id} session_id={session_id}"
-    )
-
-@app.post("/interview/evaluation/store")
-def store_evaluation(user_id: str, session_id: str, report: dict):
-    """
-    Store the evaluation report in Pinecone for later retrieval
-    """
-    try:
-        store_evaluation_result(user_id, session_id, report)
-        return {
-            "status": "success",
-            "message": "Evaluation stored successfully",
-            "user_id": user_id,
-            "session_id": session_id
-        }
-    except Exception as e:
-        return {
-            "status": "error",
-            "message": str(e)
-        }
