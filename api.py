@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Union, Dict, Any
 
 import requests
 
@@ -23,18 +23,46 @@ app.add_middleware(
 BACKEND_URL = "https://qp158oafxk.execute-api.ap-south-1.amazonaws.com"
 
 
+# ==========================================================
+# REQUEST MODELS
+# ==========================================================
+
 class QAPair(BaseModel):
     question: str
     answer: str
 
 
 class EvaluateRequest(BaseModel):
-    user_id: str
+
+    user_id: Union[str, int]
     session_id: Optional[int] = None
+
+    role: Optional[str] = None
+    session_type: Optional[str] = None
+    round_type: Optional[str] = None
+    company_tier: Optional[str] = None
+    icp: Optional[str] = None
+
     transcript: Optional[List[QAPair]] = None
 
+    signal_snapshots: Optional[List[Dict[str, Any]]] = None
 
-def save_evaluation_to_backend(session_id: int, report: dict):
+    audio_s3_key: Optional[str] = None
+
+    onboarding_summary: Optional[Dict[str, Any]] = None
+
+    session_duration_seconds: Optional[int] = None
+    question_count: Optional[int] = None
+
+
+# ==========================================================
+# BACKEND SAVE
+# ==========================================================
+
+def save_evaluation_to_backend(
+    session_id: int,
+    report: dict
+):
 
     rubric = report.get("rubric_scores", {})
     presence = report.get("interview_presence", {})
@@ -106,8 +134,10 @@ def save_evaluation_to_backend(session_id: int, report: dict):
         )
     }
 
-    print(f"[BACKEND] Saving evaluation to {BACKEND_URL}")
-    print(f"[BACKEND] Session ID: {session_id}")
+    print("\n==============================")
+    print("BACKEND SAVE")
+    print("==============================")
+    print(payload)
 
     response = requests.post(
         f"{BACKEND_URL}/interview/evaluation",
@@ -115,24 +145,48 @@ def save_evaluation_to_backend(session_id: int, report: dict):
         timeout=30
     )
 
-    print(f"[BACKEND] Response Status: {response.status_code}")
-    print(f"[BACKEND] Response Body: {response.text}")
+    print(
+        f"[BACKEND] STATUS = {response.status_code}"
+    )
+
+    print(
+        f"[BACKEND] BODY = {response.text}"
+    )
 
     response.raise_for_status()
 
     return response.json()
 
 
+# ==========================================================
+# HEALTH
+# ==========================================================
+
 @app.get("/")
 def health():
+
     return {
         "status": "ok",
         "service": "interview-evaluator"
     }
 
 
+# ==========================================================
+# MAIN EVALUATION
+# ==========================================================
+
 @app.post("/evaluate")
 def evaluate(req: EvaluateRequest):
+
+    print("\n==============================")
+    print("REQUEST RECEIVED")
+    print("==============================")
+    print(req.model_dump())
+
+    # --------------------------------
+    # Primary path
+    # Lambda sends transcript
+    # --------------------------------
 
     if req.transcript and len(req.transcript) > 0:
 
@@ -145,19 +199,28 @@ def evaluate(req: EvaluateRequest):
         ]
 
         print(
-            f"[EVAL] Using frontend transcript "
+            f"[EVAL] Using payload transcript "
             f"({len(conversation)} Q&A pairs)"
         )
+
+    # --------------------------------
+    # Fallback path
+    # Streamlit / legacy Pinecone
+    # --------------------------------
 
     else:
 
         print(
-            f"[EVAL] Fetching transcript from Pinecone "
-            f"for user={req.user_id}"
+            f"[EVAL] Transcript missing."
+        )
+
+        print(
+            f"[EVAL] Fetching from Pinecone "
+            f"user={req.user_id}"
         )
 
         conversation = get_interview_data(
-            req.user_id
+            str(req.user_id)
         )
 
     if not conversation:
@@ -166,6 +229,11 @@ def evaluate(req: EvaluateRequest):
             "status": "error",
             "message": "No interview data found"
         }
+
+    print(
+        f"[EVAL] Starting evaluation "
+        f"for session={req.session_id}"
+    )
 
     report = evaluate_interview(
         conversation
@@ -204,7 +272,7 @@ def evaluate(req: EvaluateRequest):
 
     return {
         "status": "success",
-        "user_id": req.user_id,
+        "user_id": str(req.user_id),
         "session_id": req.session_id,
         "mastery": mastery,
         "report": report,
