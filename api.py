@@ -106,11 +106,17 @@ def save_evaluation_to_backend(session_id: int, report: dict):
         )
     }
 
+    print(f"[BACKEND] Saving evaluation to {BACKEND_URL}")
+    print(f"[BACKEND] Session ID: {session_id}")
+
     response = requests.post(
         f"{BACKEND_URL}/interview/evaluation",
         json=payload,
         timeout=30
     )
+
+    print(f"[BACKEND] Response Status: {response.status_code}")
+    print(f"[BACKEND] Response Body: {response.text}")
 
     response.raise_for_status()
 
