@@ -1,6 +1,7 @@
 import streamlit as st
 
 from services.pinecone_service import get_interview_data, get_all_sessions
+from services.pinecone_service import get_interview_data
 from services.evaluator import evaluate_interview
 from services.mastery import calculate_mastery
 
@@ -55,12 +56,6 @@ st.markdown(
         color:#D1D5DB;
     }
 
-    .presence-label{
-        font-size:12px;
-        color:#6B7280;
-        margin-top:4px;
-    }
-
     </style>
     """,
     unsafe_allow_html=True
@@ -68,14 +63,21 @@ st.markdown(
 
 query_params = st.query_params
 
-user_id = query_params.get("user_id", None)
+user_id = query_params.get(
+    "user_id",
+    None
+)
 
 if not user_id:
 
     st.markdown(
         """
         <style>
-        .stApp { background: #0E1117; }
+
+        .stApp {
+            background: #0E1117;
+        }
+
         .entry-box{
             border:1px solid #262730;
             border-radius:12px;
@@ -83,24 +85,40 @@ if not user_id:
             background:#111827;
             margin-bottom:18px;
         }
+
         </style>
         """,
         unsafe_allow_html=True
     )
 
-    st.title("🎓 VIDYA Interview Evaluator")
-    st.markdown("### Select or Enter Interview Details")
+    st.title(
+        "🎓 VIDYA Interview Evaluator"
+    )
+
+    st.markdown(
+        "### Select or Enter Interview Details"
+    )
+
     st.divider()
 
     sessions = get_all_sessions()
-    session_options = ["None"] + [s["label"] for s in sessions]
-    selected_session = st.selectbox("Available Interview Sessions", session_options)
+
+    session_options = ["None"] + [
+        s["label"] for s in sessions
+    ]
+
+    selected_session = st.selectbox(
+        "Available Interview Sessions",
+        session_options
+    )
 
     st.divider()
 
     col1, col2 = st.columns(2)
+
     with col1:
         manual_user_id = st.text_input("User ID")
+
     with col2:
         manual_session_id = st.text_input("Session ID")
 
@@ -115,6 +133,7 @@ if not user_id:
                 if session["label"] == selected_session:
                     final_user_id = session["user_id"]
                     break
+
         elif manual_user_id:
             final_user_id = manual_user_id
 
@@ -126,32 +145,82 @@ if not user_id:
 
     st.stop()
 
-with st.spinner("Fetching interview transcript..."):
-    conversation = get_interview_data(user_id)
+with st.spinner(
+    "Fetching interview transcript..."
+):
+
+    conversation = get_interview_data(
+        user_id
+    )
 
 if not conversation:
-    st.title("🎯 VIDYA Interview Evaluator")
-    st.error(f"No interview transcript found for user: {user_id}")
+
+    st.title(
+        "🎯 VIDYA Interview Evaluator"
+    )
+
+    st.error(
+        f"No interview transcript found for user: {user_id}"
+    )
+
     st.stop()
 
-with st.spinner("Generating evaluation..."):
-    report  = evaluate_interview(conversation)
-    mastery = calculate_mastery(report)
+with st.spinner(
+    "Generating evaluation..."
+):
 
-readiness_score   = report.get("readiness_score", 0)
-rubric            = report.get("rubric_scores", {})
-strengths         = report.get("strengths", [])
-gaps              = report.get("gaps", [])
-summary           = report.get("summary", "No summary available.")
+    report = evaluate_interview(
+        conversation
+    )
+
+    mastery = calculate_mastery(
+        report
+    )
+
+readiness_score = report.get(
+    "readiness_score",
+    0
+)
+
+rubric = report.get(
+    "rubric_scores",
+    {}
+)
+
+strengths = report.get(
+    "strengths",
+    []
+)
+
+gaps = report.get(
+    "gaps",
+    []
+)
+
+summary = report.get(
+    "summary",
+    "No summary available."
+)
+
+# ===================================
+# DESIGN MAPPING — read from report, no longer re-derived here
+# ===================================
+
 performance_label = report.get("performance_label", "Good Performance")
+
 presence          = report.get("interview_presence", {})
-presence_score    = presence.get("score", rubric.get("confidence", readiness_score))
+presence_score    = presence.get("score",   rubric.get("confidence", readiness_score))
 presence_summary  = presence.get("summary", "")
+
 coach_moments     = report.get("coach_moments", [])
 
-st.success("Evaluation Generated Successfully")
+st.success(
+    "Evaluation Generated Successfully"
+)
 
-left_panel, center_panel, right_panel = st.columns([1, 3, 1.5])
+left_panel, center_panel, right_panel = st.columns(
+    [1, 3, 1.5]
+)
 
 # =========================
 # LEFT PANEL
@@ -159,37 +228,90 @@ left_panel, center_panel, right_panel = st.columns([1, 3, 1.5])
 
 with left_panel:
 
-    st.markdown("## 🎯 VIDYA")
-    st.markdown("### Interview Evaluator")
-    st.divider()
+    st.markdown(
+        "## 🎯 VIDYA"
+    )
 
-    st.markdown("#### Current User")
-    st.success(user_id)
-
-    st.markdown("#### Session")
-    st.info("Latest Interview")
+    st.markdown(
+        "### Interview Evaluator"
+    )
 
     st.divider()
 
-    st.markdown("#### Evaluation Status")
-    st.info(performance_label)
+    st.markdown(
+        "#### Current User"
+    )
+
+    st.success(
+        user_id
+    )
+
+    st.markdown(
+        "#### Session"
+    )
+
+    session_display = query_params.get(
+        "session_id",
+        "Unknown"
+    )
+
+    st.info(
+       str(session_display)
+    )
+
+
+    
+    st.divider()
+
+    st.markdown(
+        "#### Evaluation Status"
+    )
 
     if readiness_score >= 90:
-        st.success("Interview Ready")
+
+        st.success(
+            "Interview Ready"
+        )
+
     elif readiness_score >= 75:
-        st.info("Strong Candidate")
+
+        st.info(
+            "Strong Candidate"
+        )
+
     elif readiness_score >= 60:
-        st.warning("Needs Improvement")
+
+        st.warning(
+            "Needs Improvement"
+        )
+
     else:
-        st.error("Requires Practice")
+
+        st.error(
+            "Requires Practice"
+        )
 
     st.divider()
 
-    st.markdown("#### Score Snapshot")
-    st.write(f"Readiness: {readiness_score}/100")
-    st.write(f"Mastery: {int(mastery * 100)}%")
-    st.write(f"Strengths: {len(strengths)}")
-    st.write(f"Gaps: {len(gaps)}")
+    st.markdown(
+        "#### Score Snapshot"
+    )
+
+    st.write(
+        f"Readiness: {readiness_score}/100"
+    )
+
+    st.write(
+        f"Mastery: {int(mastery * 100)}%"
+    )
+
+    st.write(
+        f"Strengths: {len(strengths)}"
+    )
+
+    st.write(
+        f"Gaps: {len(gaps)}"
+    )
 
 # =========================
 # CENTER PANEL
@@ -197,43 +319,82 @@ with left_panel:
 
 with center_panel:
 
-    st.markdown("## Evaluation Metrics")
+    st.markdown(
+        "## Evaluation Metrics"
+    )
 
-    # All 7 metrics in one single row
-    m1, m2, m3, m4, m5, m6, m7 = st.columns(7)
+    row1 = st.columns(4)
 
-    with m1:
-        st.metric("Readiness", readiness_score)
+    with row1[0]:
 
-    with m2:
-        st.metric("Clarity", rubric.get("clarity_structure", 0))
+        st.metric(
+            "Readiness",
+            readiness_score
+        )
+        st.caption(performance_label)
 
-    with m3:
-        st.metric("Technical", rubric.get("technical_depth", 0))
+    with row1[1]:
 
-    with m4:
-        st.metric("Confidence", rubric.get("confidence", 0))
+        st.metric(
+            "Clarity",
+            rubric.get("clarity_structure", 0)
+        )
 
-    with m5:
-        st.metric("Storytelling", rubric.get("storytelling", 0))
+    with row1[2]:
 
-    with m6:
-        st.metric("Question Handling", rubric.get("question_handling", 0))
+        st.metric(
+            "Technical",
+            rubric.get("technical_depth", 0)
+        )
 
-    with m7:
-        st.metric("Mastery", f"{int(mastery * 100)}%")
+    with row1[3]:
+
+        st.metric(
+            "Confidence",
+            rubric.get("confidence", 0)
+        )
+
+    row2 = st.columns(3)
+
+    with row2[0]:
+
+        st.metric(
+            "Storytelling",
+            rubric.get("storytelling", 0)
+        )
+
+    with row2[1]:
+
+        st.metric(
+            "Question Handling",
+            rubric.get("question_handling", 0)
+        )
+
+    with row2[2]:
+
+        st.metric(
+            "Mastery",
+            f"{int(mastery * 100)}%"
+        )
 
     st.divider()
 
-    st.markdown(f"## Interview Transcript ({len(conversation)} Questions)")
+    st.markdown(
+        f"## Interview Transcript ({len(conversation)} Questions)"
+    )
 
     transcript_container = st.container(border=True)
 
     with transcript_container:
 
         if len(conversation) == 0:
-            st.warning("Transcript is empty.")
+
+            st.warning(
+                "Transcript is empty."
+            )
+
         else:
+
             for index, item in enumerate(conversation, start=1):
 
                 question = item.get("question", "")
@@ -266,8 +427,13 @@ with center_panel:
 with right_panel:
 
     st.markdown("## Summary")
+
     st.markdown(
-        f'<div class="summary-box">{summary}</div>',
+        f"""
+        <div class="summary-box">
+        {summary}
+        </div>
+        """,
         unsafe_allow_html=True
     )
 
@@ -275,15 +441,14 @@ with right_panel:
 
     # ── Interview Presence ──────────────────────────────────────────────────
     st.markdown("## Interview Presence")
+
     st.metric("Presence Score", presence_score)
-    st.markdown(
-        f'<div class="presence-label">💬 {presence_summary}</div>',
-        unsafe_allow_html=True
-    )
+    st.caption(presence_summary)
 
     st.divider()
 
     st.markdown("## Strengths")
+
     if strengths:
         for item in strengths:
             st.success(item)
@@ -292,21 +457,34 @@ with right_panel:
 
     st.divider()
 
-    st.markdown("## Learning Gaps")
+    st.markdown("## Improvement Areas")
+
     if gaps:
         for item in gaps:
             st.warning(item)
     else:
-        st.info("No learning gaps identified.")
+        st.info("No improvement areas identified.")
 
     st.divider()
 
-    # ── Interview Coach — moved here, below Learning Gaps ──────────────────
-    st.markdown("## Interview Coach")
-    if coach_moments:
-        for moment in coach_moments:
-            st.markdown(f"**{moment['title']}**")
-            st.caption(moment['feedback'])
-            st.divider()
-    else:
-        st.info("No coach moments available.")
+# =========================
+# INTERVIEW COACH
+# =========================
+
+st.markdown("## Interview Coach")
+
+if coach_moments:
+
+    for moment in coach_moments:
+
+        st.markdown(
+            f"""
+            **{moment['title']}**
+
+            {moment['feedback']}
+            """
+        )
+
+else:
+
+    st.info("No coach moments available.")
