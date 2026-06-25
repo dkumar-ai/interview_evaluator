@@ -1,3 +1,7 @@
+import os
+
+BACKEND_AUTH_TOKEN = os.getenv("BACKEND_AUTH_TOKEN")
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -139,9 +143,15 @@ def save_evaluation_to_backend(
     print("==============================")
     print(payload)
 
+    headers = {
+        "Authorization": f"Bearer {BACKEND_AUTH_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    print("AUTH TOKEN PRESENT:", bool(BACKEND_AUTH_TOKEN))
     response = requests.post(
         f"{BACKEND_URL}/interview/evaluation",
         json=payload,
+        headers=headers,
         timeout=30
     )
 
