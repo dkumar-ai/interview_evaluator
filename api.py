@@ -1,207 +1,280 @@
-import os
-import json
-from pinecone import Pinecone
-from dotenv import load_dotenv
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import List, Optional, Union, Dict, Any
 
-load_dotenv()
+import requests
 
-pc = Pinecone(
-    api_key=os.getenv("PINECONE_API_KEY")
+from services.pinecone_service import get_interview_data
+from services.evaluator import evaluate_interview
+from services.mastery import calculate_mastery
+
+
+app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-index = pc.Index(
-    os.getenv("PINECONE_INDEX_NAME")
-)
+BACKEND_URL = "https://qp158oafxk.execute-api.ap-south-1.amazonaws.com"
 
 
-def store_evaluation_result(
-    user_id,
-    session_id,
+# ==========================================================
+# REQUEST MODELS
+# ==========================================================
+
+class QAPair(BaseModel):
+    question: str
+    answer: str
+
+
+class EvaluateRequest(BaseModel):
+
+    user_id: Union[str, int]
+    session_id: Optional[int] = None
+
+    role: Optional[str] = None
+    session_type: Optional[str] = None
+    round_type: Optional[str] = None
+    company_tier: Optional[str] = None
+    icp: Optional[str] = None
+
+    transcript: Optional[List[QAPair]] = None
+
+    signal_snapshots: Optional[List[Dict[str, Any]]] = None
+
+    audio_s3_key: Optional[str] = None
+
+    onboarding_summary: Optional[Dict[str, Any]] = None
+
+    session_duration_seconds: Optional[int] = None
+    question_count: Optional[int] = None
+
+
+# ==========================================================
+# BACKEND SAVE
+# ==========================================================
+
+def save_evaluation_to_backend(
+    session_id: int,
     report: dict
 ):
 
-    user_id = str(user_id)
-    session_id = str(session_id)
+    rubric = report.get("rubric_scores", {})
+    presence = report.get("interview_presence", {})
 
-    vector_id = f"evaluation-{session_id}"
+    payload = {
+        "session_id": session_id,
 
-    index.upsert(
-        vectors=[
-            {
-                "id": vector_id,
-                "values": [0.001] * 3072,
-                "metadata": {
-                    "doc_type": "interview_evaluation",
-                    "session_id": session_id,
-                    "text": json.dumps(report)
-                }
-            }
-        ],
-        namespace=user_id
+        "overall_score": report.get(
+            "readiness_score",
+            0
+        ),
+
+        "performance_label": report.get(
+            "performance_label",
+            ""
+        ),
+
+        "skill_evaluation": {
+            "clarity": rubric.get(
+                "clarity_structure",
+                0
+            ),
+            "technical": rubric.get(
+                "technical_depth",
+                0
+            ),
+            "confidence": rubric.get(
+                "confidence",
+                0
+            ),
+            "storytelling": rubric.get(
+                "storytelling",
+                0
+            ),
+            "question_handling": rubric.get(
+                "question_handling",
+                0
+            )
+        },
+
+        "presence_score": presence.get(
+            "score",
+            0
+        ),
+
+        "presence_summary": presence.get(
+            "summary",
+            ""
+        ),
+
+        "strengths": report.get(
+            "strengths",
+            []
+        ),
+
+        "improvement_areas": report.get(
+            "gaps",
+            []
+        ),
+
+        "coach_moments": report.get(
+            "coach_moments",
+            []
+        ),
+
+        "summary": report.get(
+            "summary",
+            ""
+        )
+    }
+
+    print("\n==============================")
+    print("BACKEND SAVE")
+    print("==============================")
+    print(payload)
+
+    response = requests.post(
+        f"{BACKEND_URL}/interview/evaluation",
+        json=payload,
+        timeout=30
     )
 
     print(
-        f"[PINECONE] Stored evaluation for "
-        f"user={user_id} session={session_id}"
+        f"[BACKEND] STATUS = {response.status_code}"
     )
 
-
-def get_interview_data(user_id):
-
-    user_id = str(user_id)
-
-    results = index.query(
-        namespace=user_id,
-        vector=[0.001] * 3072,
-        top_k=100,
-        include_metadata=True
+    print(
+        f"[BACKEND] BODY = {response.text}"
     )
 
-    for match in results.matches:
+    response.raise_for_status()
 
-        metadata = match.metadata
+    return response.json()
 
-        if metadata.get("doc_type") != "interview_questions":
-            continue
 
-        text = metadata.get("text", "")
+# ==========================================================
+# HEALTH
+# ==========================================================
+
+@app.get("/")
+def health():
+
+    return {
+        "status": "ok",
+        "service": "interview-evaluator"
+    }
+
+
+# ==========================================================
+# MAIN EVALUATION
+# ==========================================================
+
+@app.post("/evaluate")
+def evaluate(req: EvaluateRequest):
+
+    print("\n==============================")
+    print("REQUEST RECEIVED")
+    print("==============================")
+    print(req.model_dump())
+
+    # --------------------------------
+    # Primary path
+    # Lambda sends transcript
+    # --------------------------------
+
+    if req.transcript and len(req.transcript) > 0:
+
+        conversation = [
+            {
+                "question": qa.question,
+                "answer": qa.answer
+            }
+            for qa in req.transcript
+        ]
+
+        print(
+            f"[EVAL] Using payload transcript "
+            f"({len(conversation)} Q&A pairs)"
+        )
+
+    # --------------------------------
+    # Fallback path
+    # Streamlit / legacy Pinecone
+    # --------------------------------
+
+    else:
+
+        print(
+            f"[EVAL] Transcript missing."
+        )
+
+        print(
+            f"[EVAL] Fetching from Pinecone "
+            f"user={req.user_id}"
+        )
+
+        conversation = get_interview_data(
+            str(req.user_id)
+        )
+
+    if not conversation:
+
+        return {
+            "status": "error",
+            "message": "No interview data found"
+        }
+
+    print(
+        f"[EVAL] Starting evaluation "
+        f"for session={req.session_id}"
+    )
+
+    report = evaluate_interview(
+        conversation
+    )
+
+    mastery = calculate_mastery(
+        report
+    )
+
+    backend_response = None
+
+    if req.session_id:
 
         try:
 
-            parsed = json.loads(text)
-
-            questions = parsed.get(
-                "questions",
-                []
+            backend_response = save_evaluation_to_backend(
+                req.session_id,
+                report
             )
 
-            conversation = []
-
-            for item in questions:
-
-                conversation.append(
-                    {
-                        "question": item.get(
-                            "question",
-                            item.get(
-                                "text",
-                                ""
-                            )
-                        ),
-                        "answer": item.get(
-                            "answer",
-                            ""
-                        )
-                    }
-                )
-
-            return conversation
+            print(
+                f"[BACKEND] Evaluation saved "
+                f"for session={req.session_id}"
+            )
 
         except Exception as e:
 
             print(
-                "PINECONE PARSE ERROR:",
-                str(e)
+                f"[BACKEND ERROR] {str(e)}"
             )
-
-    return []
-
-
-def get_evaluation_result(user_id, session_id):
-
-    user_id = str(user_id)
-    session_id = str(session_id)
-
-    results = index.query(
-        namespace=user_id,
-        vector=[0.001] * 3072,
-        top_k=100,
-        include_metadata=True
-    )
-
-    # Check for completed evaluation
-    for match in results.matches:
-
-        metadata = match.metadata
-
-        if (
-            metadata.get("doc_type") == "interview_evaluation"
-            and str(metadata.get("session_id")) == session_id
-        ):
-
-            try:
-                return {
-                    "status": "completed",
-                    "report": json.loads(
-                        metadata.get("text", "{}")
-                    )
-                }
-
-            except Exception as e:
-
-                print(
-                    "EVALUATION PARSE ERROR:",
-                    str(e)
-                )
-
-                return None
-
-    # Check processing status
-    for match in results.matches:
-
-        metadata = match.metadata
-
-        if (
-            metadata.get("doc_type") == "evaluation_status"
-            and str(metadata.get("session_id")) == session_id
-        ):
 
             return {
-                "status": metadata.get(
-                    "status",
-                    "PROCESSING"
-                ),
-                "report": None
+                "status": "error",
+                "message": f"Failed to save evaluation to backend: {str(e)}"
             }
 
-    return None
-
-
-def get_all_sessions():
-
-    results = index.query(
-        vector=[0.001] * 3072,
-        top_k=1000,
-        include_metadata=True
-    )
-
-    sessions = []
-
-    for match in results.matches:
-
-        metadata = match.metadata
-
-        if metadata.get("doc_type") == "interview_questions":
-
-            user_id = str(match.namespace)
-
-            session_id = str(
-                metadata.get(
-                    "session_id",
-                    "Latest"
-                )
-            )
-
-            session_label = (
-                f"{user_id} - {session_id}"
-            )
-
-            sessions.append(
-                {
-                    "label": session_label,
-                    "user_id": user_id,
-                    "session_id": session_id
-                }
-            )
-
-    return sessions
+    return {
+        "status": "success",
+        "user_id": str(req.user_id),
+        "session_id": req.session_id,
+        "mastery": mastery,
+        "report": report,
+        "backend_response": backend_response
+    }
