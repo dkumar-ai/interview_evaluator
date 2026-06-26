@@ -1,10 +1,5 @@
 import streamlit as st
 
-# from services.pinecone_service import get_interview_data, get_all_sessions
-# from services.pinecone_service import get_interview_data
-# from services.evaluator import evaluate_interview
-# from services.mastery import calculate_mastery
-
 import os
 import requests
 
@@ -69,9 +64,6 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# query_params = st.query_params
-# user_id = query_params.get("user_id", "user_002")
-# if not user_id:
 
 
 query_params = st.query_params
@@ -130,83 +122,6 @@ if not session_id:
             )
 
     st.stop()
-
-    # sessions = get_all_sessions()
-
-    # session_options = ["None"] + [
-    #     s["label"] for s in sessions
-    # ]
-
-    # selected_session = st.selectbox(
-    #     "Available Interview Sessions",
-    #     session_options
-    # )
-
-    # st.divider()
-
-    # col1, col2 = st.columns(2)
-
-    # with col1:
-    #     manual_user_id = st.text_input("User ID")
-
-    # with col2:
-    #     manual_session_id = st.text_input("Session ID")
-
-    # st.divider()
-
-    # if st.button("Generate Evaluation Report", type="primary"):
-
-    #     final_user_id = None
-
-    #     if selected_session != "None":
-    #         for session in sessions:
-    #             if session["label"] == selected_session:
-    #                 final_user_id = session["user_id"]
-    #                 break
-
-    #     elif manual_user_id:
-    #         final_user_id = manual_user_id
-
-    #     if final_user_id:
-    #         st.query_params["user_id"] = final_user_id
-    #         st.rerun()
-    #     else:
-    #         st.error("Please select a session or enter a User ID")
-
-    # st.stop()
-
-# with st.spinner(
-#     "Fetching interview transcript..."
-# ):
-
-#     conversation = get_interview_data(
-#         user_id
-#     )
-
-# if not conversation:
-
-#     st.title(
-#         "🎯 VIDYA Interview Evaluator"
-#     )
-
-#     st.error(
-#         f"No interview transcript found for user: {user_id}"
-#     )
-
-#     st.stop()
-
-# with st.spinner(
-#     "Generating evaluation..."
-# ):
-
-#     report = evaluate_interview(
-#         conversation
-#     )
-
-#     mastery = calculate_mastery(
-#         report
-#     )
-
 with st.spinner(
     "Fetching evaluation..."
 ):
@@ -215,11 +130,18 @@ with st.spinner(
         "Authorization": f"Bearer {JWT_TOKEN}"
     }
 
-    response = requests.get(
-        f"{BACKEND_URL}/interview/evaluation/{session_id}",
-        headers=headers,
-        timeout=30
-    )
+    try:
+
+        response = requests.get(
+            f"{BACKEND_URL}/interview/evaluation/{session_id}",
+            headers=headers,
+            timeout=30
+        )
+
+    except requests.exceptions.RequestException as e:
+
+        st.error(f"Unable to connect to backend.\n\n{e}")
+        st.stop()
 
 if response.status_code == 404:
 
@@ -253,333 +175,300 @@ elif response.status_code != 200:
 
     st.stop()
 
-evaluation = response.json()
+payload = response.json()
+
+if not payload.get("success", False):
+    st.error("Backend returned an unsuccessful response.")
+    st.stop()
+
+evaluation = payload["data"]
+
+report = evaluation
+
+readiness_score = report.get("overall_score", 0)
+
+skills = report.get("skill_evaluation", {})
+
+rubric = {
+    "clarity_structure": skills.get("clarity", 0),
+    "technical_depth": skills.get("technical", 0),
+    "confidence": skills.get("confidence", 0),
+    "storytelling": skills.get("storytelling", 0),
+    "question_handling": skills.get("question_handling", 0)
+}
+
+strengths = report.get("strengths", [])
+
+gaps = report.get("improvement_areas", [])
+
+summary = report.get(
+    "summary",
+    "No summary available."
+)
+
+performance_label = report.get(
+    "performance_label",
+    "Evaluation Available"
+)
+
+presence_score = report.get(
+    "presence_score",
+    0
+)
+
+presence_summary = report.get(
+    "presence_summary",
+    ""
+)
+
+coach_moments = report.get(
+    "coach_moments",
+    []
+)
+
+mastery = readiness_score / 100
+
+conversation = []
 
 st.success(
-    "Evaluation fetched successfully."
+    "Evaluation Loaded Successfully"
 )
 
-st.write("### Backend Response")
-
-st.json(
-    evaluation
+left_panel, center_panel, right_panel = st.columns(
+    [1, 3, 1.5]
 )
 
-st.stop()
+# =========================
+# LEFT PANEL
+# =========================
 
+with left_panel:
 
+    st.markdown(
+        "## 🎯 VIDYA"
+    )
 
+    st.markdown(
+        "### Interview Evaluator"
+    )
 
+    st.divider()
 
+    st.markdown(
+        "#### Current User"
+    )
 
-# readiness_score = report.get(
-#     "readiness_score",
-#     0
-# )
+    st.success(
+        f"Session {session_id}"
+    )
 
-# rubric = report.get(
-#     "rubric_scores",
-#     {}
-# )
+    st.markdown(
+        "#### Session"
+    )
 
-# strengths = report.get(
-#     "strengths",
-#     []
-# )
+    session_display = query_params.get(
+        "session_id",
+        "Unknown"
+    )
 
-# gaps = report.get(
-#     "gaps",
-#     []
-# )
-
-# summary = report.get(
-#     "summary",
-#     "No summary available."
-# )
-
-# # ===================================
-# # DESIGN MAPPING — read from report, no longer re-derived here
-# # ===================================
-
-# performance_label = report.get("performance_label", "Good Performance")
-
-# presence          = report.get("interview_presence", {})
-# presence_score    = presence.get("score",   rubric.get("confidence", readiness_score))
-# presence_summary  = presence.get("summary", "")
-
-# coach_moments     = report.get("coach_moments", [])
-
-# st.success(
-#     "Evaluation Generated Successfully"
-# )
-
-# left_panel, center_panel, right_panel = st.columns(
-#     [1, 3, 1.5]
-# )
-
-# # =========================
-# # LEFT PANEL
-# # =========================
-
-# with left_panel:
-
-#     st.markdown(
-#         "## 🎯 VIDYA"
-#     )
-
-#     st.markdown(
-#         "### Interview Evaluator"
-#     )
-
-#     st.divider()
-
-#     st.markdown(
-#         "#### Current User"
-#     )
-
-#     st.success(
-#         user_id
-#     )
-
-#     st.markdown(
-#         "#### Session"
-#     )
-
-#     session_display = query_params.get(
-#         "session_id",
-#         "Unknown"
-#     )
-
-#     st.info(
-#        str(session_display)
-#     )
+    st.info(
+       str(session_display)
+    )
 
 
     
-#     st.divider()
+    st.divider()
 
-#     st.markdown(
-#         "#### Evaluation Status"
-#     )
+    st.markdown(
+        "#### Evaluation Status"
+    )
 
-#     if readiness_score >= 90:
+    if readiness_score >= 90:
 
-#         st.success(
-#             "Interview Ready"
-#         )
+        st.success(
+            "Interview Ready"
+        )
 
-#     elif readiness_score >= 75:
+    elif readiness_score >= 75:
 
-#         st.info(
-#             "Strong Candidate"
-#         )
+        st.info(
+            "Strong Candidate"
+        )
 
-#     elif readiness_score >= 60:
+    elif readiness_score >= 60:
 
-#         st.warning(
-#             "Needs Improvement"
-#         )
+        st.warning(
+            "Needs Improvement"
+        )
 
-#     else:
+    else:
 
-#         st.error(
-#             "Requires Practice"
-#         )
+        st.error(
+            "Requires Practice"
+        )
 
-#     st.divider()
+    st.divider()
 
-#     st.markdown(
-#         "#### Score Snapshot"
-#     )
+    st.markdown(
+        "#### Score Snapshot"
+    )
 
-#     st.write(
-#         f"Readiness: {readiness_score}/100"
-#     )
+    st.write(
+        f"Readiness: {readiness_score}/100"
+    )
 
-#     st.write(
-#         f"Mastery: {int(mastery * 100)}%"
-#     )
+    st.write(
+        f"Mastery: {int(mastery * 100)}%"
+    )
 
-#     st.write(
-#         f"Strengths: {len(strengths)}"
-#     )
+    st.write(
+        f"Strengths: {len(strengths)}"
+    )
 
-#     st.write(
-#         f"Gaps: {len(gaps)}"
-#     )
+    st.write(
+        f"Gaps: {len(gaps)}"
+    )
 
-# # =========================
-# # CENTER PANEL
-# # =========================
+# =========================
+# CENTER PANEL
+# =========================
 
-# with center_panel:
+with center_panel:
 
-#     st.markdown(
-#         "## Evaluation Metrics"
-#     )
+    st.markdown(
+        "## Evaluation Metrics"
+    )
 
-#     row1 = st.columns(4)
+    row1 = st.columns(4)
 
-#     with row1[0]:
+    with row1[0]:
 
-#         st.metric(
-#             "Readiness",
-#             readiness_score
-#         )
-#         st.caption(performance_label)
+        st.metric(
+            "Readiness",
+            readiness_score
+        )
+        st.caption(performance_label)
 
-#     with row1[1]:
+    with row1[1]:
 
-#         st.metric(
-#             "Clarity",
-#             rubric.get("clarity_structure", 0)
-#         )
+        st.metric(
+            "Clarity",
+            rubric.get("clarity_structure", 0)
+        )
 
-#     with row1[2]:
+    with row1[2]:
 
-#         st.metric(
-#             "Technical",
-#             rubric.get("technical_depth", 0)
-#         )
+        st.metric(
+            "Technical",
+            rubric.get("technical_depth", 0)
+        )
 
-#     with row1[3]:
+    with row1[3]:
 
-#         st.metric(
-#             "Confidence",
-#             rubric.get("confidence", 0)
-#         )
+        st.metric(
+            "Confidence",
+            rubric.get("confidence", 0)
+        )
 
-#     row2 = st.columns(3)
+    row2 = st.columns(3)
 
-#     with row2[0]:
+    with row2[0]:
 
-#         st.metric(
-#             "Storytelling",
-#             rubric.get("storytelling", 0)
-#         )
+        st.metric(
+            "Storytelling",
+            rubric.get("storytelling", 0)
+        )
 
-#     with row2[1]:
+    with row2[1]:
 
-#         st.metric(
-#             "Question Handling",
-#             rubric.get("question_handling", 0)
-#         )
+        st.metric(
+            "Question Handling",
+            rubric.get("question_handling", 0)
+        )
 
-#     with row2[2]:
+    with row2[2]:
 
-#         st.metric(
-#             "Mastery",
-#             f"{int(mastery * 100)}%"
-#         )
+        st.metric(
+            "Mastery",
+            f"{int(mastery * 100)}%"
+        )
 
-#     st.divider()
+    st.divider()
 
-#     st.markdown(
-#         f"## Interview Transcript ({len(conversation)} Questions)"
-#     )
+    st.markdown(
+        "## Interview Transcript"
+    )
 
-#     transcript_container = st.container(border=True)
+    st.info(
+        "Transcript is not currently returned by the backend evaluation API."
+    )
 
-#     with transcript_container:
+    
+# =========================
+# RIGHT PANEL
+# =========================
 
-#         if len(conversation) == 0:
+with right_panel:
 
-#             st.warning(
-#                 "Transcript is empty."
-#             )
+    st.markdown("## Summary")
 
-#         else:
+    st.markdown(
+        f"""
+        <div class="summary-box">
+        {summary}
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 
-#             for index, item in enumerate(conversation, start=1):
+    st.divider()
 
-#                 question = item.get("question", "")
-#                 answer   = item.get("answer",   "")
+    # ── Interview Presence ──────────────────────────────────────────────────
+    st.markdown("## Interview Presence")
 
-#                 st.markdown(
-#                     f"""
-#                     <div class='question-box'>
-#                     <b>Question {index}</b><br><br>
-#                     {question}
-#                     </div>
-#                     """,
-#                     unsafe_allow_html=True
-#                 )
+    st.metric("Presence Score", presence_score)
+    st.caption(presence_summary)
 
-#                 st.markdown(
-#                     f"""
-#                     <div class='answer-box'>
-#                     <b>Answer</b><br><br>
-#                     {answer}
-#                     </div>
-#                     """,
-#                     unsafe_allow_html=True
-#                 )
+    st.divider()
 
-# # =========================
-# # RIGHT PANEL
-# # =========================
+    st.markdown("## Strengths")
 
-# with right_panel:
+    if strengths:
+        for item in strengths:
+            st.success(item)
+    else:
+        st.info("No strengths identified.")
 
-#     st.markdown("## Summary")
+    st.divider()
 
-#     st.markdown(
-#         f"""
-#         <div class="summary-box">
-#         {summary}
-#         </div>
-#         """,
-#         unsafe_allow_html=True
-#     )
+    st.markdown("## Improvement Areas")
 
-#     st.divider()
+    if gaps:
+        for item in gaps:
+            st.warning(item)
+    else:
+        st.info("No improvement areas identified.")
 
-#     # ── Interview Presence ──────────────────────────────────────────────────
-#     st.markdown("## Interview Presence")
+    st.divider()
 
-#     st.metric("Presence Score", presence_score)
-#     st.caption(presence_summary)
+# =========================
+# INTERVIEW COACH
+# =========================
 
-#     st.divider()
+st.markdown("## Interview Coach")
 
-#     st.markdown("## Strengths")
+if coach_moments:
 
-#     if strengths:
-#         for item in strengths:
-#             st.success(item)
-#     else:
-#         st.info("No strengths identified.")
+    for moment in coach_moments:
 
-#     st.divider()
+        st.markdown(
+            f"""
+            **{moment['title']}**
 
-#     st.markdown("## Improvement Areas")
+            {moment['feedback']}
+            """
+        )
 
-#     if gaps:
-#         for item in gaps:
-#             st.warning(item)
-#     else:
-#         st.info("No improvement areas identified.")
+else:
 
-#     st.divider()
-
-# # =========================
-# # INTERVIEW COACH
-# # =========================
-
-# st.markdown("## Interview Coach")
-
-# if coach_moments:
-
-#     for moment in coach_moments:
-
-#         st.markdown(
-#             f"""
-#             **{moment['title']}**
-
-#             {moment['feedback']}
-#             """
-#         )
-
-# else:
-
-#     st.info("No coach moments available.")
+    st.info("No coach moments available.")
