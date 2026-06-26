@@ -395,13 +395,50 @@ with center_panel:
 
     st.divider()
 
-    st.markdown(
-        "## Interview Transcript"
-    )
+    with st.spinner("Loading transcript..."):
 
-    st.info(
-        "Transcript is not currently returned by the backend evaluation API."
-    )
+        transcript_response = requests.get(
+            f"https://interviewevaluator-production.up.railway.app/transcript/{session_id}",
+            timeout=30
+        )
+
+    if transcript_response.status_code == 200:
+
+        transcript = transcript_response.json()["transcript"]
+
+        st.markdown(
+            f"## Interview Transcript ({len(transcript)} Questions)"
+        )
+
+        transcript_container = st.container(border=True)
+
+        with transcript_container:
+
+            for index, item in enumerate(transcript, start=1):
+
+                st.markdown(
+                    f"""
+                    <div class='question-box'>
+                    <b>Question {index}</b><br><br>
+                    {item['question']}
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+
+                st.markdown(
+                    f"""
+                    <div class='answer-box'>
+                    <b>Answer</b><br><br>
+                    {item['answer']}
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+
+    else:
+
+        st.info("Transcript not available.")
 
     
 # =========================
