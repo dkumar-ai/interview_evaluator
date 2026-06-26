@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional, Union, Dict, Any
-
+from fastapi import HTTPException
 import requests
 
 from services.pinecone_service import get_interview_data
@@ -26,6 +26,11 @@ app.add_middleware(
 
 BACKEND_URL = "https://qp158oafxk.execute-api.ap-south-1.amazonaws.com"
 
+# ==========================================================
+# TEMP TRANSCRIPT STORE
+# ==========================================================
+
+transcript_store = {}
 
 # ==========================================================
 # REQUEST MODELS
@@ -180,7 +185,26 @@ def health():
         "service": "interview-evaluator"
     }
 
+# ==========================================================
+# GET TRANSCRIPT
+# ==========================================================
 
+@app.get("/transcript/{session_id}")
+def get_transcript(session_id: int):
+
+    transcript = transcript_store.get(str(session_id))
+
+    if transcript is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Transcript not found."
+        )
+
+    return {
+        "success": True,
+        "session_id": session_id,
+        "transcript": transcript
+    }
 # ==========================================================
 # MAIN EVALUATION
 # ==========================================================
@@ -207,6 +231,9 @@ def evaluate(req: EvaluateRequest):
             }
             for qa in req.transcript
         ]
+        if req.session_id:
+
+            transcript_store[str(req.session_id)] = conversation
 
         print(
             f"[EVAL] Using payload transcript "
@@ -232,6 +259,8 @@ def evaluate(req: EvaluateRequest):
         conversation = get_interview_data(
             str(req.user_id)
         )
+    if req.session_id and conversation:
+        transcript_store[str(req.session_id)] = conversation
 
     if not conversation:
 
