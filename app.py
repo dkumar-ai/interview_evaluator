@@ -1,18 +1,15 @@
 import streamlit as st
 
-import os
-import requests
-
+from services.pinecone_service import get_interview_data, get_all_sessions
+from services.pinecone_service import get_interview_data
+from services.evaluator import evaluate_interview
+from services.mastery import calculate_mastery
 
 st.set_page_config(
     page_title="VIDYA Interview Evaluator",
     page_icon="🎯",
     layout="wide"
 )
-
-BACKEND_URL = "https://qp158oafxk.execute-api.ap-south-1.amazonaws.com"
-
-JWT_TOKEN = os.getenv("BACKEND_AUTH_TOKEN")
 
 st.markdown(
     """
@@ -64,13 +61,14 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-
-
 query_params = st.query_params
 
-session_id = query_params.get("session_id", "")
+user_id = query_params.get(
+    "user_id",
+    None
+)
 
-if not session_id:
+if not user_id:
 
     st.markdown(
         """
@@ -93,145 +91,131 @@ if not session_id:
         unsafe_allow_html=True
     )
 
-    st.title("🎓 VIDYA Interview Evaluator")
+    st.title(
+        "🎓 VIDYA Interview Evaluator"
+    )
 
     st.markdown(
-        "### Enter Session ID"
+        "### Select or Enter Interview Details"
     )
 
     st.divider()
 
-    manual_session_id = st.text_input(
-        "Session ID"
+    sessions = get_all_sessions()
+
+    session_options = ["None"] + [
+        s["label"] for s in sessions
+    ]
+
+    selected_session = st.selectbox(
+        "Available Interview Sessions",
+        session_options
     )
 
-    if st.button(
-        "Load Evaluation",
-        type="primary"
-    ):
+    st.divider()
 
-        if manual_session_id:
+    col1, col2 = st.columns(2)
 
-            st.query_params["session_id"] = manual_session_id
+    with col1:
+        manual_user_id = st.text_input("User ID")
+
+    with col2:
+        manual_session_id = st.text_input("Session ID")
+
+    st.divider()
+
+    if st.button("Generate Evaluation Report", type="primary"):
+
+        final_user_id = None
+
+        if selected_session != "None":
+            for session in sessions:
+                if session["label"] == selected_session:
+                    final_user_id = session["user_id"]
+                    break
+
+        elif manual_user_id:
+            final_user_id = manual_user_id
+
+        if final_user_id:
+            st.query_params["user_id"] = final_user_id
             st.rerun()
-
         else:
-
-            st.error(
-                "Please enter a Session ID"
-            )
+            st.error("Please select a session or enter a User ID")
 
     st.stop()
+
 with st.spinner(
-    "Fetching evaluation..."
+    "Fetching interview transcript..."
 ):
 
-    headers = {
-        "Authorization": f"Bearer {JWT_TOKEN}"
-    }
+    conversation = get_interview_data(
+        user_id
+    )
 
-    try:
+if not conversation:
 
-        response = requests.get(
-            f"{BACKEND_URL}/interview/evaluation/{session_id}",
-            headers=headers,
-            timeout=30
-        )
-
-    except requests.exceptions.RequestException as e:
-
-        st.error(f"Unable to connect to backend.\n\n{e}")
-        st.stop()
-
-if response.status_code == 404:
+    st.title(
+        "🎯 VIDYA Interview Evaluator"
+    )
 
     st.error(
-        f"No evaluation found for session {session_id}"
+        f"No interview transcript found for user: {user_id}"
     )
 
     st.stop()
 
-elif response.status_code == 401:
+with st.spinner(
+    "Generating evaluation..."
+):
 
-    st.error(
-        "Authentication failed."
+    report = evaluate_interview(
+        conversation
     )
 
-    st.stop()
-
-elif response.status_code == 403:
-
-    st.error(
-        "Authorization failed."
+    mastery = calculate_mastery(
+        report
     )
 
-    st.stop()
+readiness_score = report.get(
+    "readiness_score",
+    0
+)
 
-elif response.status_code != 200:
+rubric = report.get(
+    "rubric_scores",
+    {}
+)
 
-    st.error(
-        response.text
-    )
+strengths = report.get(
+    "strengths",
+    []
+)
 
-    st.stop()
-
-payload = response.json()
-
-if not payload.get("success", False):
-    st.error("Backend returned an unsuccessful response.")
-    st.stop()
-
-evaluation = payload["data"]
-
-report = evaluation
-
-readiness_score = report.get("overall_score", 0)
-
-skills = report.get("skill_evaluation", {})
-
-rubric = {
-    "clarity_structure": skills.get("clarity", 0),
-    "technical_depth": skills.get("technical", 0),
-    "confidence": skills.get("confidence", 0),
-    "storytelling": skills.get("storytelling", 0),
-    "question_handling": skills.get("question_handling", 0)
-}
-
-strengths = report.get("strengths", [])
-
-gaps = report.get("improvement_areas", [])
+gaps = report.get(
+    "gaps",
+    []
+)
 
 summary = report.get(
     "summary",
     "No summary available."
 )
 
-performance_label = report.get(
-    "performance_label",
-    "Evaluation Available"
-)
+# ===================================
+# DESIGN MAPPING — read from report, no longer re-derived here
+# ===================================
 
-presence_score = report.get(
-    "presence_score",
-    0
-)
+performance_label = report.get("performance_label", "Good Performance")
 
-presence_summary = report.get(
-    "presence_summary",
-    ""
-)
+presence          = report.get("interview_presence", {})
+presence_score    = presence.get("score",   rubric.get("confidence", readiness_score))
+presence_summary  = presence.get("summary", "")
 
-coach_moments = report.get(
-    "coach_moments",
-    []
-)
-
-mastery = readiness_score / 100
-
-conversation = []
+coach_moments     = report.get("coach_moments", [])
 
 st.success(
-    "Evaluation Loaded Successfully"
+    "Evaluation Generated Successfully"
 )
 
 left_panel, center_panel, right_panel = st.columns(
@@ -259,7 +243,7 @@ with left_panel:
     )
 
     st.success(
-        f"Session {session_id}"
+        user_id
     )
 
     st.markdown(
@@ -395,32 +379,32 @@ with center_panel:
 
     st.divider()
 
-    with st.spinner("Loading transcript..."):
+    st.markdown(
+        f"## Interview Transcript ({len(conversation)} Questions)"
+    )
 
-        transcript_response = requests.get(
-            f"https://interviewevaluator-production.up.railway.app/transcript/{session_id}",
-            timeout=30
-        )
+    transcript_container = st.container(border=True)
 
-    if transcript_response.status_code == 200:
+    with transcript_container:
 
-        transcript = transcript_response.json()["transcript"]
+        if len(conversation) == 0:
 
-        st.markdown(
-            f"## Interview Transcript ({len(transcript)} Questions)"
-        )
+            st.warning(
+                "Transcript is empty."
+            )
 
-        transcript_container = st.container(border=True)
+        else:
 
-        with transcript_container:
+            for index, item in enumerate(conversation, start=1):
 
-            for index, item in enumerate(transcript, start=1):
+                question = item.get("question", "")
+                answer   = item.get("answer",   "")
 
                 st.markdown(
                     f"""
                     <div class='question-box'>
                     <b>Question {index}</b><br><br>
-                    {item['question']}
+                    {question}
                     </div>
                     """,
                     unsafe_allow_html=True
@@ -430,17 +414,12 @@ with center_panel:
                     f"""
                     <div class='answer-box'>
                     <b>Answer</b><br><br>
-                    {item['answer']}
+                    {answer}
                     </div>
                     """,
                     unsafe_allow_html=True
                 )
 
-    else:
-
-        st.info("Transcript not available.")
-
-    
 # =========================
 # RIGHT PANEL
 # =========================
@@ -500,7 +479,7 @@ if coach_moments:
 
         st.markdown(
             f"""
-            **{moment['title']}**
+            **{moment['title']}** ({moment.get('timestamp_seconds', 0)}s)
 
             {moment['feedback']}
             """
