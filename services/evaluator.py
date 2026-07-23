@@ -68,7 +68,8 @@ def _enrich_report(report: dict) -> dict:
         for idx, gap in enumerate(report.get("gaps", [])[:3], start=1):
             coach_moments.append({
                 "title":    gap[:60],
-                "feedback": gap
+                "feedback": gap,
+                "timestamp_seconds": 0
             })
         report["coach_moments"] = coach_moments
 
@@ -127,7 +128,8 @@ Required Schema:
     "coach_moments": [
         {{
             "title": "Short label for this coaching point (max 60 chars)",
-            "feedback": "Specific, actionable coaching advice for the candidate"
+            "feedback": "Specific, actionable coaching advice for the candidate",
+            "timestamp_seconds": 0
         }}
     ]
 }}
@@ -140,6 +142,11 @@ Rules:
 - The summary field must be a single line string with no newline characters inside it.
 - Do not use line breaks inside any string value in the JSON.
 - Return ONLY JSON. Do not return markdown or any text outside the JSON object.
+- strengths must contain between 2 and 5 items.
+- Never return an empty strengths array.
+- Even if the candidate performs poorly, identify positive behaviors such as willingness to answer, professionalism, engagement, honesty, or communication effort.
+- timestamp_seconds must be included for every coach_moment.
+- timestamp_seconds should be an integer representing the approximate second in the interview where the coaching point occurred.
 
 Interview Transcript:
 
@@ -197,6 +204,12 @@ Interview Transcript:
             }
 
         report.setdefault("strengths",     [])
+        if not report["strengths"]:
+            report["strengths"] = [
+                "Actively participated throughout the interview.",
+                "Attempted to answer all interview questions."
+            ]
+        
         report.setdefault("gaps",          [])
         report.setdefault("summary",       "")
         report.setdefault("coach_moments", [])
@@ -229,11 +242,13 @@ Interview Transcript:
             "coach_moments": [
                 {
                     "title":    "Review your answer structure",
-                    "feedback": "Use the STAR method (Situation, Task, Action, Result) to frame answers clearly."
+                    "feedback": "Use the STAR method (Situation, Task, Action, Result) to frame answers clearly.",
+                    "timestamp_seconds": 0
                 },
                 {
                     "title":    "Strengthen technical depth",
-                    "feedback": "Back each technical claim with a concrete example or metric from past experience."
+                    "feedback": "Back each technical claim with a concrete example or metric from past experience.",
+                    "timestamp_seconds": 0
                 }
             ]
         }
